@@ -1,11 +1,26 @@
 // Vercel Serverless Function — /api/generate
-// 브랜드 컨텍스트 + 사용자 입력으로 디자인 브리프를 생성해 JSON 텍스트를 반환.
-// API 키는 서버 환경변수(ANTHROPIC_API_KEY)에만 존재하며 브라우저에 노출되지 않습니다.
+// Vercel AI Gateway 경유로 Claude를 호출합니다.
+// 인증: AI_GATEWAY_API_KEY(권장) 또는 Vercel 배포 시 자동 주입되는 VERCEL_OIDC_TOKEN.
+// (별도 Anthropic 계정/키 불필요 — Vercel AI Gateway 키로 대체)
+
+const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/messages";
 
 const BRAND =
   "여성복 브랜드. 포지셔닝은 고가를 제외한 중간 가격대 컨템포러리(29cm·무신사에서 판매가 좋은 컨템포러리)와 SPA 위주. " +
   "코어 타겟은 30대 여성, 서브 타겟은 20대 중후반과 40대 초중반. " +
   "완성도 있는 디자인과 합리적 가격, 데일리 착용성, 그리고 소재를 중심으로 한 시리즈 개발을 중시함.";
+
+function normalizeModel(m) {
+  var model = m || "anthropic/claude-sonnet-5";
+  if (model.indexOf("/") === -1) {
+    // 원시 Anthropic 모델 ID를 AI Gateway 슬러그로 매핑
+    if (/haiku/i.test(model)) model = "anthropic/claude-haiku-4.5";
+    else if (/sonnet/i.test(model)) model = "anthropic/claude-sonnet-5";
+    else if (/opus/i.test(model)) model = "anthropic/claude-opus-5";
+    else model = "anthropic/" + model;
+  }
+  return model;
+}
 
 function buildPrompt(o) {
   var season = o.season, chapter = o.chapter, item = o.item, material = o.material, extra = o.extra;
@@ -62,18 +77,25 @@ function readBody(req) {
 
 module.exports = async function (req, res) {
   try {
+    var gatewayKey = process.env.AI_GATEWAY_API_KEY || "";
+    var oidc = process.env.VERCEL_OIDC_TOKEN || "";
+    var model = normalizeModel(process.env.CLAUDE_MODEL);
+
     // 상태 점검용 (브라우저에서 /api/generate 로 접속하면 이게 보임)
     if (req.method === "GET") {
       return send(res, 200, {
         ok: true,
-        hasKey: !!process.env.ANTHROPIC_API_KEY,
-        model: process.env.CLAUDE_MODEL || "claude-sonnet-5"
+        provider: "vercel-ai-gateway",
+        hasGatewayKey: !!gatewayKey,
+        hasOidc: !!oidc,
+        model: model
       });
     }
     if (req.method !== "POST") return send(res, 405, { error: "POST only" });
 
-    var key = process.env.ANTHROPIC_API_KEY;
-    if (!key) return send(res, 500, { error: "서버에 ANTHROPIC_API_KEY가 설정되지 않았어요. Vercel 환경변수를 확인하세요." });
+    if (!gatewayKey && !oidc) {
+      return send(res, 500, { error: "인증 정보가 없어요. Vercel 환경변수 AI_GATEWAY_API_KEY를 설정하세요." });
+    }
     if (typeof fetch !== "function") return send(res, 500, { error: "Node 18 이상 런타임이 필요해요." });
 
     var body = req.body;
@@ -81,17 +103,15 @@ module.exports = async function (req, res) {
       var raw = (typeof body === "string" && body) ? body : await readBody(req);
       try { body = raw ? JSON.parse(raw) : {}; } catch (_) { body = {}; }
     }
-    var season = body.season, item = body.item;
-    if (!season || !item) return send(res, 400, { error: "시즌과 아이템은 필수예요." });
+    if (!body.season || !body.item) return send(res, 400, { error: "시즌과 아이템은 필수예요." });
 
-    var model = process.env.CLAUDE_MODEL || "claude-sonnet-5";
-    var r = await fetch("https://api.anthropic.com/v1/messages", {
+    var headers = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
+    if (gatewayKey) headers["x-api-key"] = gatewayKey;
+    else headers["authorization"] = "Bearer " + oidc;
+
+    var r = await fetch(GATEWAY_URL, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01"
-      },
+      headers: headers,
       body: JSON.stringify({
         model: model,
         max_tokens: 2000,
