@@ -120,7 +120,7 @@ module.exports = async function (req, res) {
     });
 
     var txt = await r.text();
-    if (!r.ok) return send(res, 502, { error: "생성 요청이 실패했어요.", detail: txt.slice(0, 600) });
+    if (!r.ok) return send(res, 502, { error: "생성 실패 [" + r.status + "] " + txt.slice(0, 400) });
 
     var data;
     try { data = JSON.parse(txt); } catch (_) { return send(res, 502, { error: "AI 응답 형식 오류" }); }
