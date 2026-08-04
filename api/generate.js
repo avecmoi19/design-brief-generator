@@ -1,7 +1,6 @@
 // Vercel Serverless Function — /api/generate
 // Vercel AI Gateway 경유로 Claude를 호출합니다.
 // 인증: AI_GATEWAY_API_KEY(권장) 또는 Vercel 배포 시 자동 주입되는 VERCEL_OIDC_TOKEN.
-// (별도 Anthropic 계정/키 불필요 — Vercel AI Gateway 키로 대체)
 
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/messages";
 
@@ -13,7 +12,6 @@ const BRAND =
 function normalizeModel(m) {
   var model = m || "anthropic/claude-sonnet-5";
   if (model.indexOf("/") === -1) {
-    // 원시 Anthropic 모델 ID를 AI Gateway 슬러그로 매핑
     if (/haiku/i.test(model)) model = "anthropic/claude-haiku-4.5";
     else if (/sonnet/i.test(model)) model = "anthropic/claude-sonnet-5";
     else if (/opus/i.test(model)) model = "anthropic/claude-opus-5";
@@ -23,40 +21,50 @@ function normalizeModel(m) {
 }
 
 function buildPrompt(o) {
-  var season = o.season, chapter = o.chapter, item = o.item, material = o.material, extra = o.extra;
-  var matLine = material
-    ? "- 중심 소재: " + material + "  (이번 브리프는 이 소재를 축으로 한 시리즈 개발 관점에서 작성하라)"
+  var matLine = o.material
+    ? "- 중심 소재: " + o.material + "  (이 소재를 축으로 한 시리즈 개발 관점 반영)"
     : "- 중심 소재: 미지정";
   return [
-    "너는 여성복 브랜드의 시니어 상품기획 디렉터다. 아래 브랜드와 조건에 맞는 시즌 디자인 브리프를 작성하라.",
+    "너는 여성복 브랜드의 시니어 상품기획 디렉터다. 아래 아이템에 대해 '대표님 스타일 컨펌'에 쓸 컨펌시트를 작성하라.",
+    "핵심 목표: 히어로 상품을 사후에 발견하지 않고, 기획 단계에서 사전에 설계한다.",
     "",
     "[브랜드]",
     BRAND,
     "",
-    "[조건]",
-    "- 시즌: " + season,
-    "- 챕터/TPO: " + (chapter || "미지정"),
-    "- 아이템: " + item,
+    "[아이템 조건]",
+    "- 시즌: " + o.season,
+    "- 챕터/TPO: " + (o.chapter || "미지정"),
+    "- 아이템: " + o.item,
     matLine,
-    "- 추가 무드/키워드: " + (extra || "없음"),
+    "- 목표 판매가: " + (o.price || "미지정"),
+    "- 타깃/니즈: " + (o.target || "미지정"),
+    "- 추가 무드/키워드: " + (o.extra || "없음"),
     "",
-    "[요구]",
-    "아래 JSON 스키마로만 응답하라. 설명·머리말·코드펜스 없이 순수 JSON 객체 하나만 출력한다. 모든 값은 한국어로, 실무에 바로 쓸 만큼 구체적으로.",
-    "- series는 이 아이템과 함께 하나의 시리즈(군집)를 이룰 확장 아이템을 제안한다. 실존하지 않는 브랜드명은 절대 쓰지 말고, 같은 소재·무드로 코디/라인업이 확장되는 '아이템 종류'로만 제안하라.",
+    "[작성 규칙]",
+    "아래 JSON 스키마로만 응답하라. 설명·머리말·코드펜스 없이 순수 JSON 객체 하나만 출력한다. 모든 값은 한국어.",
+    "- assessment의 5개 항목은 각 검증 질문에 답하는 '소구점(point, 1~2문장)'과 '판정(verdict)'을 준다.",
+    "- verdict는 반드시 다음 중 하나: \"충족\", \"조건부\", \"보완 필요\".",
+    "- 이건 컨펌 전 자가진단이다. 과장하지 말 것. 정보가 부족한 항목(특히 원가는 목표 판매가가 미지정이면)은 솔직히 \"보완 필요\" 또는 \"조건부\"로 표시하고, point에 무엇을 보완해야 하는지 구체적으로 적어라.",
+    "- series는 이 아이템과 함께 시리즈(군집)를 이룰 확장 아이템만 제안한다. 실존하지 않는 브랜드명은 절대 쓰지 말고 '아이템 종류'로만.",
     "- color의 hex는 실제 색을 대표하는 값으로.",
     "",
-    '{',
-    ' "concept": "이 아이템의 한 줄 시즌 컨셉 (20자 내외, 매력적으로)",',
-    ' "direction": ["디자인 방향 4~5개, 각 한 문장"],',
-    ' "fabric": ["추천 소재 3~4개. 소재명 — 선택 이유 형식. 중심 소재가 있으면 그 소재의 변형/혼방/가공을 우선"],',
-    ' "silhouette": ["실루엣 제안 3~4개, 각 한 문장"],',
+    "{",
+    ' "concept": "이 아이템의 한 줄 컨셉 (20자 내외, 매력적으로)",',
+    ' "assessment": {',
+    '   "고객": {"point":"명확한 타깃 니즈가 있는가에 대한 소구점","verdict":"충족|조건부|보완 필요"},',
+    '   "상품성": {"point":"구매 이유가 한 문장으로 설명되는가에 대한 소구점","verdict":"충족|조건부|보완 필요"},',
+    '   "차별성": {"point":"기존 베스트·경쟁 상품과 차별화되는가에 대한 소구점","verdict":"충족|조건부|보완 필요"},',
+    '   "IMC": {"point":"대량 판매를 기대할 수 있는 근거에 대한 소구점","verdict":"충족|조건부|보완 필요"},',
+    '   "원가": {"point":"목표 판매가 대비 원가 구조가 적정한가에 대한 소구점","verdict":"충족|조건부|보완 필요"}',
+    " },",
+    ' "fabric": ["핵심 소재 2~3개. 소재명 — 한 줄 이유 형식"],',
+    ' "silhouette": ["핵심 실루엣 포인트 2~3개"],',
     ' "color": [{"name":"컬러명(한글)","hex":"#RRGGBB","note":"용도/비중"}],',
-    ' "details": ["차별화 디테일 4~5개, 각 한 문장"],',
-    ' "series": ["함께 시리즈(군집)를 이룰 확장 아이템 3~4개. \\"아이템명 — 한 줄 이유\\" 형식"],',
-    ' "sellingPoints": ["판매포인트 4~5개, 고객 관점 카피톤으로"]',
-    '}',
+    ' "details": ["핵심 디테일 2~3개"],',
+    ' "series": ["함께 시리즈를 이룰 확장 아이템 2~3개. 아이템명 — 한 줄 이유 형식"]',
+    "}",
     "",
-    "color는 5~6개, series는 3~4개 제안하라."
+    "color는 4~5개 제안하라."
   ].join("\n");
 }
 
@@ -81,7 +89,6 @@ module.exports = async function (req, res) {
     var oidc = process.env.VERCEL_OIDC_TOKEN || "";
     var model = normalizeModel(process.env.CLAUDE_MODEL);
 
-    // 상태 점검용 (브라우저에서 /api/generate 로 접속하면 이게 보임)
     if (req.method === "GET") {
       return send(res, 200, {
         ok: true,
