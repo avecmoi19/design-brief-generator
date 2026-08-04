@@ -235,7 +235,7 @@ body.editing [data-edit]:focus{outline:1.5px solid var(--burgundy)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
 <script>
 const HKEY='dbg_history_v2';
 const $=id=>document.getElementById(id);
@@ -397,31 +397,37 @@ async function captureBrief(){
 }
 $('btn-pdf').addEventListener('click', async ()=>{
   if(!current){ toast('먼저 컨펌시트를 생성하세요.'); return; }
+  if(typeof html2canvas==='undefined'||!window.jspdf){ toast('PDF 모듈 로딩 실패 — 새로고침 후 다시 시도하세요.'); return; }
   finishEdit(); toast('PDF를 만드는 중…');
   try{
     const canvas=await captureBrief();
     const img=canvas.toDataURL('image/jpeg',0.95);
     const { jsPDF }=window.jspdf;
-    const pdf=new jsPDF({orientation:canvas.width>=canvas.height?'l':'p', unit:'px', format:[canvas.width,canvas.height]});
-    pdf.addImage(img,'JPEG',0,0,canvas.width,canvas.height);
+    const m=Math.round(canvas.width*0.05);              // 좌우/상하 여백
+    const pageW=canvas.width+m*2, pageH=canvas.height+m*2;
+    const pdf=new jsPDF({orientation:pageW>=pageH?'l':'p', unit:'px', format:[pageW,pageH]});
+    pdf.setFillColor(246,241,231); pdf.rect(0,0,pageW,pageH,'F');  // 크림 배경
+    pdf.addImage(img,'JPEG',m,m,canvas.width,canvas.height);
     pdf.save(fileName('pdf'));
     toast('PDF로 저장했어요');
   }catch(e){ toast('PDF 저장 실패: '+(e.message||e)); }
 });
 $('btn-ppt').addEventListener('click', async ()=>{
   if(!current){ toast('먼저 컨펌시트를 생성하세요.'); return; }
+  if(typeof html2canvas==='undefined'||typeof PptxGenJS==='undefined'){ toast('PPT 모듈 로딩 실패 — 새로고침 후 다시 시도하세요.'); return; }
   finishEdit(); toast('PPT를 만드는 중…');
   try{
     const canvas=await captureBrief();
     const img=canvas.toDataURL('image/png');
     const pptx=new PptxGenJS();
-    const slideW=10, slideH=5.625, ratio=canvas.width/canvas.height;
-    let w=slideW, h=slideW/ratio;
-    if(h>slideH){ h=slideH; w=slideH*ratio; }
+    const slideW=10, slideH=5.625, pad=0.4, ratio=canvas.width/canvas.height;  // pad = 슬라이드 여백(inch)
+    const maxW=slideW-pad*2, maxH=slideH-pad*2;
+    let w=maxW, h=maxW/ratio;
+    if(h>maxH){ h=maxH; w=maxH*ratio; }
     const slide=pptx.addSlide();
     slide.background={ color:'F6F1E7' };
     slide.addImage({ data:img, x:(slideW-w)/2, y:(slideH-h)/2, w, h });
-    pptx.writeFile({ fileName:fileName('pptx') });
+    await pptx.writeFile({ fileName:fileName('pptx') });
     toast('PPT로 저장했어요');
   }catch(e){ toast('PPT 저장 실패: '+(e.message||e)); }
 });
