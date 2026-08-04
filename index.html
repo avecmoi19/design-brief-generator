@@ -193,7 +193,8 @@ body.editing [data-edit]:focus{outline:1.5px solid var(--burgundy)}
     <div class="brief-bar">
       <div class="hint" id="edit-hint">편집 모드에서 소구점·컬러를 고칠 수 있고, 판정 칩은 클릭하면 충족→조건부→보완 필요로 바뀌어요.</div>
       <button class="ghost" id="btn-edit">편집 모드</button>
-      <button id="btn-pdf">PDF로 저장</button>
+      <button class="ghost" id="btn-ppt">PPT 저장</button>
+      <button id="btn-pdf">PDF 저장</button>
     </div>
 
     <div class="print-title">
@@ -232,6 +233,9 @@ body.editing [data-edit]:focus{outline:1.5px solid var(--burgundy)}
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.min.js"></script>
 <script>
 const HKEY='dbg_history_v2';
 const $=id=>document.getElementById(id);
@@ -379,10 +383,47 @@ $('btn-edit').addEventListener('click', ()=>{
   $('btn-edit').textContent=editing?'편집 완료':'편집 모드';
   if(editing){ toast('편집 모드 — 소구점·컬러 수정, 판정 칩 클릭'); } else { serializeEdits(); toast('편집본으로 저장했어요'); }
 });
-$('btn-pdf').addEventListener('click', ()=>{
+function finishEdit(){ if(editing){ editing=false; document.body.classList.remove('editing'); applyEditable(false); $('btn-edit').classList.remove('on'); $('btn-edit').textContent='편집 모드'; serializeEdits(); } }
+function fileName(ext){ const n=current?[current.inputs.season,current.inputs.item].filter(Boolean).join('_'):'confirm-sheet'; return '컨펌시트_'+n.replace(/\s+/g,'-')+'.'+ext; }
+async function captureBrief(){
+  const bar=document.querySelector('.brief-bar'), pt=document.querySelector('.print-title'), vh=document.querySelector('.vd-hint');
+  bar.style.display='none'; if(vh) vh.style.display='none'; pt.style.display='block';
+  try{ if(document.fonts&&document.fonts.ready) await document.fonts.ready; }catch(_){}
+  const cream=(getComputedStyle(document.documentElement).getPropertyValue('--cream')||'#F6F1E7').trim();
+  let canvas;
+  try{ canvas=await html2canvas($('brief'),{backgroundColor:cream,scale:2,useCORS:true}); }
+  finally{ bar.style.display=''; if(vh) vh.style.display=''; pt.style.display=''; }
+  return canvas;
+}
+$('btn-pdf').addEventListener('click', async ()=>{
   if(!current){ toast('먼저 컨펌시트를 생성하세요.'); return; }
-  if(editing){ editing=false; document.body.classList.remove('editing'); applyEditable(false); $('btn-edit').classList.remove('on'); $('btn-edit').textContent='편집 모드'; serializeEdits(); }
-  setTimeout(()=>window.print(), 200);
+  finishEdit(); toast('PDF를 만드는 중…');
+  try{
+    const canvas=await captureBrief();
+    const img=canvas.toDataURL('image/jpeg',0.95);
+    const { jsPDF }=window.jspdf;
+    const pdf=new jsPDF({orientation:canvas.width>=canvas.height?'l':'p', unit:'px', format:[canvas.width,canvas.height]});
+    pdf.addImage(img,'JPEG',0,0,canvas.width,canvas.height);
+    pdf.save(fileName('pdf'));
+    toast('PDF로 저장했어요');
+  }catch(e){ toast('PDF 저장 실패: '+(e.message||e)); }
+});
+$('btn-ppt').addEventListener('click', async ()=>{
+  if(!current){ toast('먼저 컨펌시트를 생성하세요.'); return; }
+  finishEdit(); toast('PPT를 만드는 중…');
+  try{
+    const canvas=await captureBrief();
+    const img=canvas.toDataURL('image/png');
+    const pptx=new PptxGenJS();
+    const slideW=10, slideH=5.625, ratio=canvas.width/canvas.height;
+    let w=slideW, h=slideW/ratio;
+    if(h>slideH){ h=slideH; w=slideH*ratio; }
+    const slide=pptx.addSlide();
+    slide.background={ color:'F6F1E7' };
+    slide.addImage({ data:img, x:(slideW-w)/2, y:(slideH-h)/2, w, h });
+    pptx.writeFile({ fileName:fileName('pptx') });
+    toast('PPT로 저장했어요');
+  }catch(e){ toast('PPT 저장 실패: '+(e.message||e)); }
 });
 
 function showErr(m){ const el=$('err'); el.textContent=m; el.classList.add('on'); }
